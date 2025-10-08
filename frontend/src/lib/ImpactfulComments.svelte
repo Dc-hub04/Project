@@ -2,7 +2,7 @@
     export let commentsForDisplay = [];
 
     // The minimum number of comments required to show the "impactful" list.
-    const MIN_COMMENTS_THRESHOLD = 3;
+    const MIN_COMMENTS_THRESHOLD = 1;
 
     $: topComments = (() => {
         // 1. Filter out comments that don't have an AI summary, as they can't be displayed.
