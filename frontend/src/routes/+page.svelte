@@ -5,6 +5,7 @@ import Map from '$lib/Map.svelte';
 import Heatmap from '$lib/Heatmap.svelte';
 import SentimentChart from '$lib/components/SentimentChart.svelte';
 import NuanceCards from '$lib/NuanceCards.svelte';
+import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 import { filterStore, activeFilterCount } from '$lib/stores/filterStore.js';
 
 // --- State Management ---
@@ -16,7 +17,11 @@ let selectedSectionId = 'all';
 let selectedState = 'All';
 let selectedAction = 'All';
 let selectedSentiment = 'All';
-let isLoading = true;
+
+// Loading states
+let isLoadingDrafts = true;
+let isLoadingData = false;
+let initialLoad = true; 
 
 // Metrics
 let totalComments = 0;
@@ -32,7 +37,7 @@ let actionPieChartConfig = {};
 let sectionPieChartConfig = {};
 
 // --- API Configuration ---
-const API_BASE_URL = import.meta.env.VITE_PUBLIC_API_URL;
+const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // Subscribe to filter store
 let currentFilters = {};
@@ -44,7 +49,7 @@ filterStore.subscribe(value => {
 $: commentsForDisplay = (() => {
   if (!selectedDraftId) return [];
   let filtered = allComments;
-  
+
   // Apply cross-filter store filters
   if (currentFilters.section) {
     const section = sections.find(s => s.section_title === currentFilters.section);
@@ -67,7 +72,7 @@ $: commentsForDisplay = (() => {
       return ind === currentFilters.industry;
     });
   }
-  
+
   // Apply dropdown filters (if not using cross-filter)
   if (selectedSectionId !== 'all' && !currentFilters.section) {
     filtered = filtered.filter(c => c.section_id == selectedSectionId);
@@ -81,7 +86,7 @@ $: commentsForDisplay = (() => {
   if (selectedSentiment !== 'All' && !currentFilters.sentiment) {
     filtered = filtered.filter(c => c.sentiment_label == selectedSentiment);
   }
-  
+
   return filtered;
 })();
 
@@ -227,7 +232,8 @@ $: {
     data: {
       labels: ['Suggest removal', 'In Agreement', 'Suggest modification'],
       datasets: [{
-        data: [actionCounts['Suggest removal'], actionCounts['In Agreement'], actionCounts['Suggest modification']],
+        data: [actionCounts['Suggest removal'], actionCounts['In Agreement'],
+          actionCounts['Suggest modification']],
         backgroundColor: ['#dc3545', '#28a745', '#007bff']
       }]
     },
@@ -288,7 +294,7 @@ $: {
       onClick: (event, elements) => {
         if (elements.length > 0) {
           const index = elements[0].index;
-          const fullTitle = sections.find(s => 
+          const fullTitle = sections.find(s =>
             s.section_title.startsWith(sectionLabels[index].replace('...', ''))
           )?.section_title || sectionLabels[index];
           filterStore.setFilter('section', fullTitle);
@@ -322,15 +328,14 @@ $: {
 }
 
 onMount(async () => {
-    isLoading = true;
+  isLoadingDrafts = true;
   try {
     const res = await fetch(`${API_BASE_URL}/api/drafts`);
     drafts = await res.json();
   } catch (error) {
     console.error('Error fetching drafts:', error);
-  }
-  finally {
-    isLoading = false; // End loading
+  } finally {
+    isLoadingDrafts = false;
   }
 });
 
@@ -348,18 +353,35 @@ async function handleDraftChange() {
   selectedAction = 'All';
   selectedSentiment = 'All';
   filterStore.reset();
+
+  isLoadingData = true;
   
   try {
+    // Add a minimum delay for better UX on the initial load
+    const startTime = Date.now();
+    
     const [commentsRes, sectionsRes] = await Promise.all([
       fetch(`${API_BASE_URL}/api/comments/${selectedDraftId}`),
       fetch(`${API_BASE_URL}/api/sections/${selectedDraftId}`)
     ]);
+    
     allComments = await commentsRes.json();
     sections = await sectionsRes.json();
-    allComments = allComments.filter(comment => 
-        sections.some(section => section.section_id === comment.section_id));
+    allComments = allComments.filter(comment =>
+      sections.some(section => section.section_id === comment.section_id));
+    
+    // Ensure loader shows for at least 800ms on first load for smooth UX
+    if (initialLoad) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 800) {
+        await new Promise(resolve => setTimeout(resolve, 800 - elapsed));
+      }
+      initialLoad = false;
+    }
   } catch (error) {
     console.error('Error fetching data:', error);
+  } finally {
+    isLoadingData = false;
   }
 }
 
@@ -382,18 +404,51 @@ function getSentimentText(score) {
 
 <div class="container">
   <!-- Filters Section -->
+  {#if isLoadingData}
+  <div class="full-page-loader">
+    <div class="loader-content">
+      <LoadingSpinner size="large" message="" />
+      <h2 class="loader-title">Loading Dashboard Data</h2>
+      <p class="loader-note">
+        {initialLoad 
+          ? 'Connecting to backend server... This may take 15-30 seconds on first load.'
+          : 'Fetching analytics data...'}
+      </p>
+      <div class="loader-steps">
+        <div class="step">
+          <div class="step-icon">📊</div>
+          <span>Retrieving comments</span>
+        </div>
+        <div class="step">
+          <div class="step-icon">🔍</div>
+          <span>Analyzing sentiment</span>
+        </div>
+        <div class="step">
+          <div class="step-icon">📈</div>
+          <span>Building visualizations</span>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
   <div class="controls">
     <div class="control-group">
       <label for="draft-select">Draft Selection</label>
-      <select id="draft-select" bind:value={selectedDraftId}>
-        <option value="">-- Select a Draft --</option>
-        {#each drafts as draft}
-          <option value={draft.draft_id}>{draft.title}</option>
-        {/each}
-      </select>
+      {#if isLoadingDrafts}
+        <div class="loading-select">
+          <LoadingSpinner size="small" message="" />
+        </div>
+      {:else}
+        <select id="draft-select" bind:value={selectedDraftId}>
+          <option value="">-- Select a Draft --</option>
+          {#each drafts as draft}
+            <option value={draft.draft_id}>{draft.title}</option>
+          {/each}
+        </select>
+      {/if}
     </div>
 
-    {#if selectedDraftId}
+    {#if selectedDraftId && !isLoadingData}
       <div class="control-group">
         <label for="section-select">Section</label>
         <select id="section-select" bind:value={selectedSectionId}>
@@ -436,7 +491,7 @@ function getSentimentText(score) {
   </div>
 
   <!-- Active Filters Display -->
-  {#if selectedDraftId && $activeFilterCount > 0}
+  {#if selectedDraftId && $activeFilterCount > 0 && !isLoadingData}
     <div class="filter-badges">
       <span class="badge-label">Active Filters ({$activeFilterCount}):</span>
       {#if currentFilters.section}
@@ -470,7 +525,11 @@ function getSentimentText(score) {
     </div>
   {/if}
 
-  {#if selectedDraftId}
+  {#if isLoadingData}
+    <div class="loading-overlay">
+      <LoadingSpinner size="large" message="Loading dashboard data..." />
+    </div>
+  {:else if selectedDraftId}
     <!-- Summary Cards -->
     <div class="comment-summary">
       <div class="comment-box total">
@@ -623,7 +682,24 @@ function getSentimentText(score) {
 .container {
   max-width: 1600px;
   margin: 0 auto;
-  
+  padding: 1rem;
+}
+
+.loading-overlay {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin: 2rem 0;
+}
+
+.loading-select {
+  padding: 0.625rem;
+  background: white;
+  border: 2px solid #dee2e6;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .controls {
@@ -650,6 +726,159 @@ function getSentimentText(score) {
   font-weight: 600;
   color: #495057;
 }
+.full-page-loader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.loader-content {
+  text-align: center;
+  background: white;
+  padding: 3rem 2.5rem;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 90%;
+  width: 500px;
+  animation: slideIn 0.4s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.loader-title {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #2d3748;
+  letter-spacing: -0.5px;
+}
+
+.loader-note {
+  margin: 0.5rem 0 2rem;
+  font-size: 0.95rem;
+  color: #718096;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.loader-steps {
+  display: flex;
+  justify-content: space-around;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 2px solid #e2e8f0;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.step:nth-child(1) { animation-delay: 0s; }
+.step:nth-child(2) { animation-delay: 0.3s; }
+.step:nth-child(3) { animation-delay: 0.6s; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.step-icon {
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.step span {
+  font-size: 0.75rem;
+  color: #4a5568;
+  font-weight: 500;
+  text-align: center;
+  line-height: 1.3;
+}
+
+/* Mobile styles for loader */
+@media (max-width: 768px) {
+  .loader-content {
+    padding: 2rem 1.5rem;
+    width: 85%;
+    max-width: 400px;
+  }
+
+  .loader-title {
+    font-size: 1.25rem;
+    margin: 1rem 0 0.5rem;
+  }
+
+  .loader-note {
+    font-size: 0.85rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .loader-steps {
+    flex-direction: column;
+    gap: 1.5rem;
+    padding-top: 1.5rem;
+  }
+
+  .step {
+    flex-direction: row;
+    justify-content: flex-start;
+    text-align: left;
+    gap: 1rem;
+  }
+
+  .step-icon {
+    font-size: 1.75rem;
+    margin-bottom: 0;
+  }
+
+  .step span {
+    font-size: 0.85rem;
+    text-align: left;
+  }
+}
+
+@media (max-width: 480px) {
+  .loader-content {
+    padding: 1.5rem 1rem;
+    border-radius: 16px;
+  }
+
+  .loader-title {
+    font-size: 1.1rem;
+  }
+
+  .loader-note {
+    font-size: 0.8rem;
+  }
+
+  .step span {
+    font-size: 0.8rem;
+  }
+}
+
 
 select {
   font-size: 0.9rem;
@@ -727,9 +956,9 @@ select:focus {
 }
 
 .comment-summary {
-  display: flex;
-  justify-content: space-around;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
@@ -800,11 +1029,13 @@ select:focus {
   justify-content: space-between;
   align-items: center;
   gap: 2rem;
+  flex-wrap: wrap;
 }
 
 .summary-text {
   flex: 1;
   max-width: 700px;
+  min-width: 300px;
 }
 
 .summary-text h4 {
@@ -821,7 +1052,8 @@ select:focus {
 
 .wordcloud-container {
   flex-shrink: 0;
-  width: 600px;
+  width: 100%;
+  max-width: 600px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -918,6 +1150,7 @@ select:focus {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid #e9ecef;
+  flex-wrap: wrap;
 }
 
 .legend-item {
@@ -971,31 +1204,60 @@ select:focus {
   font-size: 1rem;
 }
 
+/* Mobile Responsive Styles */
 @media (max-width: 1400px) {
   .dashboard-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .section-card,
   .heatmap-card {
     grid-column: span 2;
   }
-  
+
   .map-card {
     grid-column: span 2;
     grid-row: span 1;
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 968px) {
   .container {
-    padding: 1rem;
+    padding: 0.5rem;
   }
-  
+
+  .controls {
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+
+  .control-group {
+    min-width: 100%;
+  }
+
+  .comment-summary {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .comment-box {
+    padding: 0.75rem;
+  }
+
+  .comment-box h3 {
+    font-size: 0.8rem;
+  }
+
+  .comment-box p {
+    font-size: 1rem;
+  }
+
   .dashboard-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
-  
+
   .gauge-card,
   .action-card,
   .sentiment-card,
@@ -1004,6 +1266,73 @@ select:focus {
   .heatmap-card {
     grid-column: span 1;
     grid-row: span 1;
+  }
+
+  .map-container {
+    height: 500px;
+  }
+
+  .chart-wrapper {
+    padding: 1rem;
+    height: 250px;
+  }
+
+  .summary-card {
+    padding: 1rem;
+  }
+
+  .summary-content {
+    flex-direction: column;
+  }
+
+  .summary-text {
+    max-width: 100%;
+  }
+
+  .wordcloud-container {
+    max-width: 100%;
+  }
+
+  .filter-badges {
+    padding: 0.5rem;
+  }
+
+  .badge-label {
+    width: 100%;
+    margin-bottom: 0.5rem;
+  }
+
+  .clear-all-btn {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .comment-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .card h3 {
+    font-size: 0.85rem;
+    padding: 0.75rem;
+  }
+
+  .click-hint {
+    display: block;
+    margin-top: 0.25rem;
+  }
+
+  .placeholder {
+    padding: 3rem 1rem;
+  }
+
+  .placeholder h3 {
+    font-size: 1.25rem;
+  }
+
+  .placeholder p {
+    font-size: 0.9rem;
   }
 }
 </style>
