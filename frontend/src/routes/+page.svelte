@@ -21,7 +21,6 @@ let selectedSentiment = 'All';
 // Loading states
 let isLoadingDrafts = true;
 let isLoadingData = false;
-let initialLoad = true; 
 
 // Metrics
 let totalComments = 0;
@@ -355,29 +354,15 @@ async function handleDraftChange() {
   filterStore.reset();
 
   isLoadingData = true;
-  
   try {
-    // Add a minimum delay for better UX on the initial load
-    const startTime = Date.now();
-    
     const [commentsRes, sectionsRes] = await Promise.all([
       fetch(`${API_BASE_URL}/api/comments/${selectedDraftId}`),
       fetch(`${API_BASE_URL}/api/sections/${selectedDraftId}`)
     ]);
-    
     allComments = await commentsRes.json();
     sections = await sectionsRes.json();
     allComments = allComments.filter(comment =>
       sections.some(section => section.section_id === comment.section_id));
-    
-    // Ensure loader shows for at least 800ms on first load for smooth UX
-    if (initialLoad) {
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 800) {
-        await new Promise(resolve => setTimeout(resolve, 800 - elapsed));
-      }
-      initialLoad = false;
-    }
   } catch (error) {
     console.error('Error fetching data:', error);
   } finally {
@@ -404,31 +389,10 @@ function getSentimentText(score) {
 
 <div class="container">
   <!-- Filters Section -->
-  {#if isLoadingData}
+   {#if isLoadingData}
   <div class="full-page-loader">
-    <div class="loader-content">
-      <LoadingSpinner size="large" message="" />
-      <h2 class="loader-title">Loading Dashboard Data</h2>
-      <p class="loader-note">
-        {initialLoad 
-          ? 'Connecting to backend server... This may take 15-30 seconds on first load.'
-          : 'Fetching analytics data...'}
-      </p>
-      <div class="loader-steps">
-        <div class="step">
-          <div class="step-icon">📊</div>
-          <span>Retrieving comments</span>
-        </div>
-        <div class="step">
-          <div class="step-icon">🔍</div>
-          <span>Analyzing sentiment</span>
-        </div>
-        <div class="step">
-          <div class="step-icon">📈</div>
-          <span>Building visualizations</span>
-        </div>
-      </div>
-    </div>
+    <LoadingSpinner size="large" message="Warming up the backend and loading data..." />
+    <p class="loader-note">This may take a few seconds. Hang tight!</p>
   </div>
 {/if}
   <div class="controls">
@@ -732,151 +696,20 @@ function getSentimentText(score) {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: white;
   z-index: 9999;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.loader-content {
-  text-align: center;
-  background: white;
-  padding: 3rem 2.5rem;
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  max-width: 90%;
-  width: 500px;
-  animation: slideIn 0.4s ease-out;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.loader-title {
-  margin: 1.5rem 0 0.5rem;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #2d3748;
-  letter-spacing: -0.5px;
+  font-family: sans-serif;
 }
 
 .loader-note {
-  margin: 0.5rem 0 2rem;
-  font-size: 0.95rem;
-  color: #718096;
-  line-height: 1.5;
-  font-weight: 400;
-}
-
-.loader-steps {
-  display: flex;
-  justify-content: space-around;
-  gap: 1rem;
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 2px solid #e2e8f0;
-}
-
-.step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 1;
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.step:nth-child(1) { animation-delay: 0s; }
-.step:nth-child(2) { animation-delay: 0.3s; }
-.step:nth-child(3) { animation-delay: 0.6s; }
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.5; transform: scale(0.95); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
-.step-icon {
-  font-size: 1.5rem;
-  margin-bottom: 0.25rem;
-}
-
-.step span {
-  font-size: 0.75rem;
-  color: #4a5568;
-  font-weight: 500;
-  text-align: center;
-  line-height: 1.3;
-}
-
-/* Mobile styles for loader */
-@media (max-width: 768px) {
-  .loader-content {
-    padding: 2rem 1.5rem;
-    width: 85%;
-    max-width: 400px;
-  }
-
-  .loader-title {
-    font-size: 1.25rem;
-    margin: 1rem 0 0.5rem;
-  }
-
-  .loader-note {
-    font-size: 0.85rem;
-    margin-bottom: 1.5rem;
-  }
-
-  .loader-steps {
-    flex-direction: column;
-    gap: 1.5rem;
-    padding-top: 1.5rem;
-  }
-
-  .step {
-    flex-direction: row;
-    justify-content: flex-start;
-    text-align: left;
-    gap: 1rem;
-  }
-
-  .step-icon {
-    font-size: 1.75rem;
-    margin-bottom: 0;
-  }
-
-  .step span {
-    font-size: 0.85rem;
-    text-align: left;
-  }
-}
-
-@media (max-width: 480px) {
-  .loader-content {
-    padding: 1.5rem 1rem;
-    border-radius: 16px;
-  }
-
-  .loader-title {
-    font-size: 1.1rem;
-  }
-
-  .loader-note {
-    font-size: 0.8rem;
-  }
-
-  .step span {
-    font-size: 0.8rem;
-  }
+  margin-top: 1rem;
+  font-size: 1rem;
+  color: #555;
+  font-style: italic;
 }
 
 
